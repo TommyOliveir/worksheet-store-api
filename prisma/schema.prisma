@@ -1,0 +1,67 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  TEACHER
+  BUYER
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+model User {
+  id        String      @id @default(uuid())
+  email     String      @unique
+  password  String
+  fullName  String
+  role      Role        @default(BUYER)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  worksheets Worksheet[] @relation("TeacherWorksheets")
+  orders    Order[]
+}
+
+model Worksheet {
+  id          String      @id @default(uuid())
+  title       String
+  description String
+  price       Decimal     @db.Decimal(10, 2)
+  gradeLevel  String
+  subject     String
+  s3Key       String
+  fileUrl     String
+  authorId    String
+  author      User        @relation("TeacherWorksheets", fields: [authorId], references: [id], onDelete: Cascade)
+  orderItems  OrderItem[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model Order {
+  id          String      @id @default(uuid())
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  totalAmount Decimal     @db.Decimal(10, 2)
+  status      OrderStatus @default(PENDING)
+  items       OrderItem[]
+  createdAt   DateTime    @default(now())
+}
+
+model OrderItem {
+  id          String    @id @default(uuid())
+  orderId     String
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  worksheetId String
+  worksheet   Worksheet @relation(fields: [worksheetId], references: [id])
+  price       Decimal   @db.Decimal(10, 2)
+}
