@@ -3,12 +3,16 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
+import { extname } from 'path';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateWorksheetDto } from './dto/create-worksheet.dto';
 import { UpdateWorksheetDto } from './dto/update-worksheet.dto';
 import { Worksheet, Role } from '@prisma/client';
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { buildUniqueSlug } from '../../common/utils/slug.util';
+import { toPublicWorksheet } from './worksheets.mapper';
+import { PublicWorksheet } from './types/worksheet.types';
 
 @Injectable()
 export class WorksheetsService {
@@ -34,32 +38,46 @@ export class WorksheetsService {
     });
   }
 
-  async create(authorId: string, dto: CreateWorksheetDto): Promise<Worksheet> {
-    return this.prisma.worksheet.create({
+  async create(
+    authorId: string,
+    dto: CreateWorksheetDto,
+  ): Promise<PublicWorksheet> {
+    const slug = await buildUniqueSlug(dto.title, async (candidate) => {
+      const existing = await this.prisma.worksheet.findUnique({
+        where: { slug: candidate },
+        select: { id: true },
+      });
+      return existing !== null;
+    });
+
+    const worksheet = await this.prisma.worksheet.create({
       data: {
         ...dto,
+        slug,
         authorId,
       },
+      include: { author: { select: { id: true, fullName: true } } },
     });
+
+    return toPublicWorksheet(worksheet);
   }
 
-  async findAll(): Promise<Worksheet[]> {
-    return this.prisma.worksheet.findMany({
+  async findAll(): Promise<PublicWorksheet[]> {
+    const worksheets = await this.prisma.worksheet.findMany({
+      orderBy: { createdAt: 'desc' },
       include: {
-        author: {
-          select: { id: true, fullName: true, email: true },
-        },
+        author: { select: { id: true, fullName: true } },
       },
     });
+
+    return worksheets.map(toPublicWorksheet);
   }
 
-  async findOne(id: string): Promise<Worksheet> {
+  async findOne(id: string): Promise<PublicWorksheet> {
     const worksheet = await this.prisma.worksheet.findUnique({
       where: { id },
       include: {
-        author: {
-          select: { id: true, fullName: true, email: true },
-        },
+        author: { select: { id: true, fullName: true } },
       },
     });
 
@@ -67,7 +85,22 @@ export class WorksheetsService {
       throw new NotFoundException(`Worksheet with ID ${id} not found`);
     }
 
-    return worksheet;
+    return toPublicWorksheet(worksheet);
+  }
+
+  async findBySlug(slug: string): Promise<PublicWorksheet> {
+    const worksheet = await this.prisma.worksheet.findUnique({
+      where: { slug },
+      include: {
+        author: { select: { id: true, fullName: true } },
+      },
+    });
+
+    if (!worksheet) {
+      throw new NotFoundException(`Worksheet "${slug}" not found`);
+    }
+
+    return toPublicWorksheet(worksheet);
   }
 
   async update(
@@ -75,33 +108,56 @@ export class WorksheetsService {
     userId: string,
     userRole: Role,
     dto: UpdateWorksheetDto,
-  ): Promise<Worksheet> {
-    const worksheet = await this.findOne(id);
+  ): Promise<PublicWorksheet> {
+    await this.assertCanManage(id, userId, userRole, 'update');
 
-    if (worksheet.authorId !== userId && userRole !== Role.ADMIN) {
-      throw new ForbiddenException('You can only update your own worksheets');
-    }
-
-    return this.prisma.worksheet.update({
+    const worksheet = await this.prisma.worksheet.update({
       where: { id },
       data: dto,
+      include: { author: { select: { id: true, fullName: true } } },
     });
+
+    return toPublicWorksheet(worksheet);
   }
 
-  async remove(id: string, userId: string, userRole: Role): Promise<Worksheet> {
-    const worksheet = await this.findOne(id);
+  async remove(
+    id: string,
+    userId: string,
+    userRole: Role,
+  ): Promise<PublicWorksheet> {
+    await this.assertCanManage(id, userId, userRole, 'delete');
 
-    if (worksheet.authorId !== userId && userRole !== Role.ADMIN) {
-      throw new ForbiddenException('You can only delete your own worksheets');
+    const worksheet = await this.prisma.worksheet.delete({
+      where: { id },
+      include: { author: { select: { id: true, fullName: true } } },
+    });
+
+    return toPublicWorksheet(worksheet);
+  }
+
+  private async assertCanManage(
+    id: string,
+    userId: string,
+    userRole: Role,
+    action: 'update' | 'delete',
+  ): Promise<void> {
+    const worksheet = await this.prisma.worksheet.findUnique({
+      where: { id },
+      select: { authorId: true },
+    });
+
+    if (!worksheet) {
+      throw new NotFoundException(`Worksheet with ID ${id} not found`);
     }
 
-    return this.prisma.worksheet.delete({
-      where: { id },
-    });
+    if (worksheet.authorId !== userId && userRole !== Role.ADMIN) {
+      throw new ForbiddenException(
+        `You can only ${action} your own worksheets`,
+      );
+    }
   }
 
   async generateDownloadUrl(userId: string, worksheetId: string) {
-    // 1. Verify payment in Neon database
     const purchase = await this.prisma.orderItem.findFirst({
       where: {
         worksheetId,
@@ -113,40 +169,42 @@ export class WorksheetsService {
       include: { worksheet: true },
     });
 
-    console.log('DEBUG ARGS:', { userId, worksheetId });
-    console.log('DEBUG PURCHASE RESULT:', purchase);
+    if (!purchase) {
+      throw new ForbiddenException('Purchase required before downloading.');
+    }
+
+    return { downloadUrl: await this.presignWorksheet(purchase.worksheet) };
+  }
+
+  // Scoped by a specific completed order rather than a logged-in user —
+  // used right after checkout, before the buyer necessarily has an app session.
+  async generateDownloadUrlForOrder(orderId: string, worksheetId: string) {
+    const purchase = await this.prisma.orderItem.findFirst({
+      where: {
+        worksheetId,
+        order: {
+          id: orderId,
+          status: 'COMPLETED',
+        },
+      },
+      include: { worksheet: true },
+    });
 
     if (!purchase) {
       throw new ForbiddenException('Purchase required before downloading.');
     }
 
-    // // 2. Prepare the command using the s3Key from Neon
-    // const command = new GetObjectCommand({
-    //   Bucket: process.env.AWS_S3_BUCKET_NAME,
-    //   Key: purchase.worksheet.s3Key, // e.g. "worksheets/grade-5-math.pdf"
-    // });
+    return { downloadUrl: await this.presignWorksheet(purchase.worksheet) };
+  }
 
-    // // 3. THIS IS WHERE THE DOWNLOAD URL IS CREATED:
-    // // Generates a secure, temporary HTTPS link valid for 15 minutes (900 seconds)
-    // const downloadUrl = await getSignedUrl(this.s3Client, command, {
-    //   expiresIn: 900,
-    // });
-
-    // return { downloadUrl };
-
-    // worksheets.service.ts
-
+  private async presignWorksheet(worksheet: Worksheet): Promise<string> {
+    const extension = extname(worksheet.s3Key) || '.pdf';
     const command = new GetObjectCommand({
       Bucket: process.env.AWS_S3_BUCKET_NAME,
-      Key: purchase.worksheet.s3Key, // e.g. "bg.jpeg"
-      // Tells the browser to download the file directly with a specific filename
-      ResponseContentDisposition: `attachment; filename="${purchase.worksheet.title || 'worksheet'}.jpeg"`,
+      Key: worksheet.s3Key,
+      ResponseContentDisposition: `attachment; filename="${worksheet.title || 'worksheet'}${extension}"`,
     });
 
-    const downloadUrl = await getSignedUrl(this.s3Client, command, {
-      expiresIn: 900,
-    });
-
-    return { downloadUrl };
+    return getSignedUrl(this.s3Client, command, { expiresIn: 900 });
   }
 }

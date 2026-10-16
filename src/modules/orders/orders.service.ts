@@ -1,13 +1,17 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Order, OrderStatus } from '@prisma/client';
 import { StripeService } from '../stripe/stripe.service';
 
 export interface VerifiedCheckoutSessionItem {
   id: string;
+  worksheetId: string;
   title: string;
   price: number;
-  downloadUrl?: string;
 }
 
 export interface VerifiedCheckoutSession {
@@ -143,11 +147,54 @@ export class OrdersService {
       total: Number(order.totalAmount),
       items: order.items.map((item) => ({
         id: item.id,
+        worksheetId: item.worksheetId,
         title: item.worksheet.title,
         price: Number(item.price),
-        downloadUrl: status === 'paid' ? item.worksheet.fileUrl : undefined,
       })),
     };
+  }
+
+  // Resolves and authorizes a download: the Stripe session id proves this
+  // caller completed this checkout, and the worksheet must actually be one
+  // of the order's paid-for items. Returns the local order id to hand to
+  // WorksheetsService for the actual presigned URL.
+  async getDownloadableOrderId(
+    sessionId: string,
+    worksheetId: string,
+  ): Promise<string> {
+    let session;
+    try {
+      session = await this.stripeService.retrieveSession(sessionId);
+    } catch {
+      throw new NotFoundException('Checkout session not found');
+    }
+
+    const orderId = session.metadata?.orderId;
+    if (!orderId) {
+      throw new NotFoundException('Checkout session not found');
+    }
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    if (order.status !== OrderStatus.COMPLETED) {
+      throw new ForbiddenException('Payment has not completed yet');
+    }
+
+    const ownsWorksheet = order.items.some(
+      (item) => item.worksheetId === worksheetId,
+    );
+    if (!ownsWorksheet) {
+      throw new ForbiddenException('This worksheet is not part of this order');
+    }
+
+    return order.id;
   }
 
   async findUserOrders(userId: string): Promise<Order[]> {

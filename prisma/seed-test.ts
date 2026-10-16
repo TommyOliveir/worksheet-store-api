@@ -30,6 +30,7 @@ async function main() {
   // 2. Create dummy worksheet
   const worksheet = await prisma.worksheet.create({
     data: {
+      slug: 'sample-grade-5-math-worksheet',
       title: 'Sample Grade 5 Math Worksheet',
       description: 'Practice test for fractions',
       price: 9.99,

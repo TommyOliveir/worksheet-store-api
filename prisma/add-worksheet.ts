@@ -28,6 +28,7 @@ async function addWorksheet() {
   // 2. Add the new worksheet product
   const newWorksheet = await prisma.worksheet.create({
     data: {
+      slug: `sample-grade-5-math-worksheet-${Date.now()}`,
       title: 'Sample Grade 5 Math Worksheet',
       description: 'Practice test for fractions',
       price: 9.99,

@@ -5,6 +5,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { Order } from '@prisma/client';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { StripeService } from '../stripe/stripe.service';
+import { WorksheetsService } from '../worksheets/worksheets.service';
 
 // Interface matching what JwtAuthGuard attaches to request
 interface AuthenticatedUser {
@@ -17,6 +18,7 @@ export class OrdersController {
   constructor(
     private readonly ordersService: OrdersService,
     private readonly stripeService: StripeService,
+    private readonly worksheetsService: WorksheetsService,
   ) {}
 
   @Get()
@@ -33,6 +35,24 @@ export class OrdersController {
     @Param('sessionId') sessionId: string,
   ): Promise<VerifiedCheckoutSession> {
     return this.ordersService.getCheckoutSessionDetails(sessionId);
+  }
+
+  // Public for the same reason as above: the Stripe session id itself proves
+  // access, so the buyer can download right after checkout with no app login.
+  @Public()
+  @Get('session/:sessionId/download/:worksheetId')
+  async getSessionDownloadUrl(
+    @Param('sessionId') sessionId: string,
+    @Param('worksheetId') worksheetId: string,
+  ) {
+    const orderId = await this.ordersService.getDownloadableOrderId(
+      sessionId,
+      worksheetId,
+    );
+    return this.worksheetsService.generateDownloadUrlForOrder(
+      orderId,
+      worksheetId,
+    );
   }
 
   @Post('checkout')

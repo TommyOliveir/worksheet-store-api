@@ -14,7 +14,8 @@ import { CreateWorksheetDto } from './dto/create-worksheet.dto';
 import { UpdateWorksheetDto } from './dto/update-worksheet.dto';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
-import { Worksheet, User, Role } from '@prisma/client';
+import { User, Role } from '@prisma/client';
+import { PublicWorksheet } from './types/worksheet.types';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
@@ -23,15 +24,10 @@ import { Roles } from 'src/common/decorators/roles.decorator';
 export class WorksheetsController {
   constructor(private readonly worksheetsService: WorksheetsService) {}
 
-  @Public()
-  @Get('testdownload')
-  async testDownload() {
-    // 1. Pass your seeded User ID and Worksheet ID from Neon DB
-    const userId = '03e07ef5-498f-4bbe-9e2f-c3621c80b5c9'; // Replace with your seed UserId
-    const worksheetId = '025505d1-4476-463e-9816-d790a089e35b'; // Replace with your seed WorksheetId
-
-    // 2. Call your service method
-    return this.worksheetsService.generateDownloadUrl(userId, worksheetId);
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/download')
+  async download(@Param('id') id: string, @GetUser('id') userId: string) {
+    return this.worksheetsService.generateDownloadUrl(userId, id);
   }
 
   @Post()
@@ -49,13 +45,19 @@ export class WorksheetsController {
 
   @Public()
   @Get()
-  async findAll(): Promise<Worksheet[]> {
+  async findAll(): Promise<PublicWorksheet[]> {
     return this.worksheetsService.findAll();
   }
 
   @Public()
+  @Get('slug/:slug')
+  async findBySlug(@Param('slug') slug: string): Promise<PublicWorksheet> {
+    return this.worksheetsService.findBySlug(slug);
+  }
+
+  @Public()
   @Get(':id')
-  async findOne(@Param('id') id: string): Promise<Worksheet> {
+  async findOne(@Param('id') id: string): Promise<PublicWorksheet> {
     return this.worksheetsService.findOne(id);
   }
 
@@ -64,7 +66,7 @@ export class WorksheetsController {
     @Param('id') id: string,
     @GetUser() user: Omit<User, 'password'>,
     @Body() dto: UpdateWorksheetDto,
-  ): Promise<Worksheet> {
+  ): Promise<PublicWorksheet> {
     return this.worksheetsService.update(id, user.id, user.role, dto);
   }
 
@@ -72,7 +74,7 @@ export class WorksheetsController {
   async remove(
     @Param('id') id: string,
     @GetUser() user: Omit<User, 'password'>,
-  ): Promise<Worksheet> {
+  ): Promise<PublicWorksheet> {
     return this.worksheetsService.remove(id, user.id, user.role);
   }
 }
