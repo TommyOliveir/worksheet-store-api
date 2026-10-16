@@ -6,6 +6,7 @@ import {
   Patch,
   Param,
   Delete,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { WorksheetsService } from './worksheets.service';
@@ -13,8 +14,10 @@ import { CreateWorksheetDto } from './dto/create-worksheet.dto';
 import { UpdateWorksheetDto } from './dto/update-worksheet.dto';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
-import { RolesGuard } from '../../common/guards/roles.guard';
-import { Worksheet, User } from '@prisma/client';
+import { Worksheet, User, Role } from '@prisma/client';
+import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
+import { RolesGuard } from 'src/common/guards/roles.guard';
+import { Roles } from 'src/common/decorators/roles.decorator';
 
 @Controller('worksheets')
 export class WorksheetsController {
@@ -30,13 +33,18 @@ export class WorksheetsController {
     // 2. Call your service method
     return this.worksheetsService.generateDownloadUrl(userId, worksheetId);
   }
+
   @Post()
-  @UseGuards(RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
   async create(
-    @GetUser('id') authorId: string,
+    @Req()
+    req: Request & {
+      user: { id: string; role: string };
+    },
     @Body() dto: CreateWorksheetDto,
-  ): Promise<Worksheet> {
-    return this.worksheetsService.create(authorId, dto);
+  ) {
+    return this.worksheetsService.create(req.user.id, dto);
   }
 
   @Public()
@@ -67,25 +75,4 @@ export class WorksheetsController {
   ): Promise<Worksheet> {
     return this.worksheetsService.remove(id, user.id, user.role);
   }
-
-  // @Public()
-  // @Get('testdownload')
-  // async testDownload() {
-  //   const userId = '124367bd-ed75-49cc-a990-aa2e031749a9'; // Replace with your seed UserId
-  //   const worksheetId = '6fbcd5ad-4bf1-4f67-a630-b1fe4a7f91a2'; // Replace with your seed WorksheetId
-
-  //   const downloadResult = await this.worksheetsService.generateDownloadUrl(
-  //     userId,
-  //     worksheetId,
-  //   );
-
-  //   console.log('PRESIGNED URL:', downloadResult.downloadUrl);
-  //   return downloadResult;
-  // }
-
-  // 2. PRODUCTION ENDPOINT (for actual authenticated users)
-  // @Get(':id/download')
-  // async getDownloadUrl(@Req() req: any, @Param('id') worksheetId: string) {
-  //   return this.worksheetsService.generateDownloadUrl(req.user.id, worksheetId);
-  // }
 }

@@ -17,6 +17,7 @@ enum OrderStatus {
   PENDING
   COMPLETED
   FAILED
+  CANCELLED
 }
 
 model User {
@@ -53,6 +54,7 @@ model Order {
   user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   totalAmount Decimal     @db.Decimal(10, 2)
   status      OrderStatus @default(PENDING)
+  paymentIntentId String?  @unique
   items       OrderItem[]
   createdAt   DateTime    @default(now())
 }

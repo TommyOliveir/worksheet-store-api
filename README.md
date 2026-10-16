@@ -5,17 +5,20 @@ NestJS REST API for buying and selling worksheets, powered by Prisma, Neon Postg
 ## Setup Instructions
 
 1. Install dependencies:
+
    ```bash
    npm install
    ```
 
 2. Setup environment variables:
+
    ```bash
    cp .env.example .env
    # Update DATABASE_URL with your Neon PostgreSQL connection string
    ```
 
 3. Generate Prisma client & push schema:
+
    ```bash
    npx prisma generate
    npx prisma db push
@@ -25,3 +28,5 @@ NestJS REST API for buying and selling worksheets, powered by Prisma, Neon Postg
    ```bash
    npm run start:dev
    ```
+
+## $ stripe listen --events checkout.session.completed --forward-to localhost:3001/webhooks/stripe

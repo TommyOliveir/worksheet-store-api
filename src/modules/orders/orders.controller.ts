@@ -1,22 +1,60 @@
-import { Controller, Post, Get, Body } from '@nestjs/common';
-import { OrdersService } from './orders.service';
+import { Controller, Post, Get, Body, Param, UseGuards } from '@nestjs/common';
+import { OrdersService, VerifiedCheckoutSession } from './orders.service';
 import { GetUser } from '../../common/decorators/get-user.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { Order } from '@prisma/client';
+import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
+import { StripeService } from '../stripe/stripe.service';
+
+// Interface matching what JwtAuthGuard attaches to request
+interface AuthenticatedUser {
+  id: string;
+  email: string;
+}
 
 @Controller('orders')
 export class OrdersController {
-  constructor(private readonly ordersService: OrdersService) {}
-
-  @Post()
-  async create(
-    @GetUser('id') userId: string,
-    @Body('worksheetIds') worksheetIds: string[],
-  ): Promise<Order> {
-    return this.ordersService.createOrder(userId, worksheetIds);
-  }
+  constructor(
+    private readonly ordersService: OrdersService,
+    private readonly stripeService: StripeService,
+  ) {}
 
   @Get()
+  @UseGuards(JwtAuthGuard)
   async findAll(@GetUser('id') userId: string): Promise<Order[]> {
     return this.ordersService.findUserOrders(userId);
+  }
+
+  // Public: hit right after the Stripe redirect, before any app session exists.
+  // The session id itself (Stripe-generated, unguessable) is the proof of access.
+  @Public()
+  @Get('session/:sessionId')
+  async getCheckoutSession(
+    @Param('sessionId') sessionId: string,
+  ): Promise<VerifiedCheckoutSession> {
+    return this.ordersService.getCheckoutSessionDetails(sessionId);
+  }
+
+  @Post('checkout')
+  @UseGuards(JwtAuthGuard)
+  async checkout(
+    @GetUser() user: AuthenticatedUser,
+    @Body('worksheetIds') worksheetIds: string[],
+  ) {
+    // Step 1: Create local order in Prisma DB (status: PENDING)
+    const order = await this.ordersService.createPendingOrder(
+      user.id,
+      worksheetIds,
+    );
+
+    // Step 2: Call createCheckoutSession using the created order details
+    const session = await this.stripeService.createCheckoutSession(
+      order.id, // Pass the local DB order ID
+      Number(order.totalAmount), // Total amount to charge
+      user.email, // Pre-fill user email in Stripe
+    );
+
+    // Step 3: Return the Stripe redirect URL to the frontend
+    return { url: session.url };
   }
 }

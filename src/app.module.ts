@@ -8,9 +8,10 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { WorksheetsModule } from './modules/worksheets/worksheets.module';
 import { OrdersModule } from './modules/orders/orders.module';
-
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { StripeModule } from './modules/stripe/stripe.module.js';
+import { WebhooksModule } from './modules/webhooks/webhooks.module.js';
 
 @Module({
   imports: [
@@ -20,6 +21,8 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
     UsersModule,
     WorksheetsModule,
     OrdersModule,
+    StripeModule,
+    WebhooksModule,
   ],
   controllers: [AppController],
   providers: [
