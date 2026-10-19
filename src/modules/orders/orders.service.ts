@@ -106,8 +106,11 @@ export class OrdersService {
   // STEP 3: Called by the frontend success page. Verifies the session against
   // Stripe directly rather than trusting the redirect, then reports the local
   // order's fulfillment status (the webhook may not have landed yet).
+  // `userId` is the authenticated caller: the order must belong to them, so a
+  // shared/leaked session_id link can't be used to view someone else's order.
   async getCheckoutSessionDetails(
     sessionId: string,
+    userId: string,
   ): Promise<VerifiedCheckoutSession> {
     let session;
     try {
@@ -133,10 +136,30 @@ export class OrdersService {
       throw new NotFoundException('Order not found');
     }
 
+    if (order.userId !== userId) {
+      throw new ForbiddenException('This order does not belong to you');
+    }
+
+    // Self-heal: if Stripe confirms payment but our webhook hasn't landed yet
+    // (dropped delivery, listener not running in dev, retries exhausted),
+    // fulfill the order here instead of leaving the buyer stuck on "pending"
+    // forever despite Stripe showing they were charged.
+    let orderStatus = order.status;
+    if (
+      orderStatus === OrderStatus.PENDING &&
+      session.payment_status === 'paid'
+    ) {
+      const fulfilled = await this.fulfillOrder(
+        order.id,
+        session.payment_intent as string,
+      );
+      orderStatus = fulfilled.status;
+    }
+
     const status: VerifiedCheckoutSession['status'] =
-      order.status === OrderStatus.COMPLETED
+      orderStatus === OrderStatus.COMPLETED
         ? 'paid'
-        : order.status === OrderStatus.PENDING
+        : orderStatus === OrderStatus.PENDING
           ? 'pending'
           : 'failed';
 
@@ -152,49 +175,6 @@ export class OrdersService {
         price: Number(item.price),
       })),
     };
-  }
-
-  // Resolves and authorizes a download: the Stripe session id proves this
-  // caller completed this checkout, and the worksheet must actually be one
-  // of the order's paid-for items. Returns the local order id to hand to
-  // WorksheetsService for the actual presigned URL.
-  async getDownloadableOrderId(
-    sessionId: string,
-    worksheetId: string,
-  ): Promise<string> {
-    let session;
-    try {
-      session = await this.stripeService.retrieveSession(sessionId);
-    } catch {
-      throw new NotFoundException('Checkout session not found');
-    }
-
-    const orderId = session.metadata?.orderId;
-    if (!orderId) {
-      throw new NotFoundException('Checkout session not found');
-    }
-
-    const order = await this.prisma.order.findUnique({
-      where: { id: orderId },
-      include: { items: true },
-    });
-
-    if (!order) {
-      throw new NotFoundException('Order not found');
-    }
-
-    if (order.status !== OrderStatus.COMPLETED) {
-      throw new ForbiddenException('Payment has not completed yet');
-    }
-
-    const ownsWorksheet = order.items.some(
-      (item) => item.worksheetId === worksheetId,
-    );
-    if (!ownsWorksheet) {
-      throw new ForbiddenException('This worksheet is not part of this order');
-    }
-
-    return order.id;
   }
 
   async findUserOrders(userId: string): Promise<Order[]> {

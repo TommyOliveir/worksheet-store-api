@@ -176,27 +176,6 @@ export class WorksheetsService {
     return { downloadUrl: await this.presignWorksheet(purchase.worksheet) };
   }
 
-  // Scoped by a specific completed order rather than a logged-in user —
-  // used right after checkout, before the buyer necessarily has an app session.
-  async generateDownloadUrlForOrder(orderId: string, worksheetId: string) {
-    const purchase = await this.prisma.orderItem.findFirst({
-      where: {
-        worksheetId,
-        order: {
-          id: orderId,
-          status: 'COMPLETED',
-        },
-      },
-      include: { worksheet: true },
-    });
-
-    if (!purchase) {
-      throw new ForbiddenException('Purchase required before downloading.');
-    }
-
-    return { downloadUrl: await this.presignWorksheet(purchase.worksheet) };
-  }
-
   private async presignWorksheet(worksheet: Worksheet): Promise<string> {
     const extension = extname(worksheet.s3Key) || '.pdf';
     const command = new GetObjectCommand({

@@ -1,11 +1,9 @@
 import { Controller, Post, Get, Body, Param, UseGuards } from '@nestjs/common';
 import { OrdersService, VerifiedCheckoutSession } from './orders.service';
 import { GetUser } from '../../common/decorators/get-user.decorator';
-import { Public } from '../../common/decorators/public.decorator';
 import { Order } from '@prisma/client';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { StripeService } from '../stripe/stripe.service';
-import { WorksheetsService } from '../worksheets/worksheets.service';
 
 // Interface matching what JwtAuthGuard attaches to request
 interface AuthenticatedUser {
@@ -14,49 +12,30 @@ interface AuthenticatedUser {
 }
 
 @Controller('orders')
+@UseGuards(JwtAuthGuard)
 export class OrdersController {
   constructor(
     private readonly ordersService: OrdersService,
     private readonly stripeService: StripeService,
-    private readonly worksheetsService: WorksheetsService,
   ) {}
 
   @Get()
-  @UseGuards(JwtAuthGuard)
   async findAll(@GetUser('id') userId: string): Promise<Order[]> {
     return this.ordersService.findUserOrders(userId);
   }
 
-  // Public: hit right after the Stripe redirect, before any app session exists.
-  // The session id itself (Stripe-generated, unguessable) is the proof of access.
-  @Public()
+  // Requires login: the session id proves the checkout happened, but access
+  // to its contents is also scoped to the logged-in user who owns the order,
+  // so a shared/leaked link can't be used to view someone else's purchase.
   @Get('session/:sessionId')
   async getCheckoutSession(
     @Param('sessionId') sessionId: string,
+    @GetUser('id') userId: string,
   ): Promise<VerifiedCheckoutSession> {
-    return this.ordersService.getCheckoutSessionDetails(sessionId);
-  }
-
-  // Public for the same reason as above: the Stripe session id itself proves
-  // access, so the buyer can download right after checkout with no app login.
-  @Public()
-  @Get('session/:sessionId/download/:worksheetId')
-  async getSessionDownloadUrl(
-    @Param('sessionId') sessionId: string,
-    @Param('worksheetId') worksheetId: string,
-  ) {
-    const orderId = await this.ordersService.getDownloadableOrderId(
-      sessionId,
-      worksheetId,
-    );
-    return this.worksheetsService.generateDownloadUrlForOrder(
-      orderId,
-      worksheetId,
-    );
+    return this.ordersService.getCheckoutSessionDetails(sessionId, userId);
   }
 
   @Post('checkout')
-  @UseGuards(JwtAuthGuard)
   async checkout(
     @GetUser() user: AuthenticatedUser,
     @Body('worksheetIds') worksheetIds: string[],
