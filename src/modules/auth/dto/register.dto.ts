@@ -1,11 +1,4 @@
-import {
-  IsEmail,
-  IsEnum,
-  IsNotEmpty,
-  IsString,
-  MinLength,
-} from 'class-validator';
-import { Role } from '@prisma/client';
+import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
 
 export class RegisterDto {
   @IsEmail()
@@ -20,6 +13,7 @@ export class RegisterDto {
   @IsNotEmpty()
   fullName!: string;
 
-  @IsEnum(Role)
-  role!: Role;
+  // `role` is intentionally absent. It used to be accepted here and spread
+  // into the create, which let anyone register themselves as ADMIN with a
+  // plain curl. New accounts take the schema default (BUYER).
 }

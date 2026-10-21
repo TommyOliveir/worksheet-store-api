@@ -8,6 +8,11 @@ import { User } from '@prisma/client';
 export interface JwtPayload {
   sub: string;
   email: string;
+  sid: string;
+}
+
+export interface AuthenticatedUser extends Omit<User, 'password'> {
+  sessionId: string;
 }
 
 @Injectable()
@@ -27,17 +32,26 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: JwtPayload): Promise<Omit<User, 'password'>> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub },
+  async validate(payload: JwtPayload): Promise<AuthenticatedUser> {
+    // Tokens issued before sessions existed carry no `sid`, so there is no row
+    // to check them against and they are no longer accepted.
+    if (!payload.sid) {
+      throw new UnauthorizedException('Session is no longer valid');
+    }
+
+    const session = await this.prisma.session.findUnique({
+      where: { id: payload.sid },
+      include: { user: true },
     });
 
-    if (!user) {
-      throw new UnauthorizedException('User not found');
+    // The row decides, not the token: a correctly signed, unexpired token is
+    // still rejected once its session has been revoked by logout or lapsed.
+    if (!session || session.revokedAt || session.expiresAt <= new Date()) {
+      throw new UnauthorizedException('Session is no longer valid');
     }
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { password: _, ...result } = user;
-    return result;
+    const { password: _, ...user } = session.user;
+    return { ...user, sessionId: session.id };
   }
 }

@@ -1,6 +1,5 @@
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 generator client {
@@ -30,6 +29,22 @@ model User {
   updatedAt DateTime    @updatedAt
   worksheets Worksheet[] @relation("TeacherWorksheets")
   orders    Order[]
+  sessions  Session[]
+}
+
+// A login creates a row here and the token carries its id. Auth is decided by
+// this row, not by the token alone, so logout can end a session server-side.
+model Session {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userAgent String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Worksheet {
