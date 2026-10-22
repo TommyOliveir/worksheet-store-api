@@ -32,16 +32,22 @@ model User {
   sessions  Session[]
 }
 
-// A login creates a row here and the token carries its id. Auth is decided by
-// this row, not by the token alone, so logout can end a session server-side.
+// A login creates a row here and both tokens carry its id. Auth is decided by
+// this row, not by the tokens alone, so logout can end a session server-side.
 model Session {
-  id        String    @id @default(uuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userAgent String?
-  expiresAt DateTime
-  revokedAt DateTime?
-  createdAt DateTime  @default(now())
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userAgent        String?
+  // SHA-256 of the one refresh token currently valid for this session. Each
+  // refresh replaces it, so a token that has already been used stops matching.
+  refreshTokenHash String?
+  // When the refresh token was last rotated, to tell a concurrent refresh
+  // from a replayed token.
+  refreshedAt      DateTime?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
 
   @@index([userId])
   @@index([expiresAt])

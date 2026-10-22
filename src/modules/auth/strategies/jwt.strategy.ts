@@ -1,9 +1,11 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import { ConfigService } from '@nestjs/config';
+import { Request } from 'express';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { User } from '@prisma/client';
+import { AUTH_CONFIG, AuthConfig } from '../auth.config';
+import { ACCESS_TOKEN_COOKIE } from '../auth-cookie.service';
 
 export interface JwtPayload {
   sub: string;
@@ -16,19 +18,20 @@ export interface AuthenticatedUser extends Omit<User, 'password'> {
 }
 
 @Injectable()
-export class JwtStrategy extends PassportStrategy(Strategy) {
+export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   constructor(
-    configService: ConfigService,
+    @Inject(AUTH_CONFIG) config: AuthConfig,
     private readonly prisma: PrismaService,
   ) {
-    const secret = configService.get<string>('JWT_SECRET');
-    if (!secret) {
-      throw new Error('JWT_SECRET environment variable is not set');
-    }
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      // Read from the httpOnly cookie only. A Bearer header is not accepted,
+      // so the token never has to be handed to page JavaScript.
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        (req: Request) =>
+          (req?.cookies?.[ACCESS_TOKEN_COOKIE] as string | undefined) ?? null,
+      ]),
       ignoreExpiration: false,
-      secretOrKey: secret,
+      secretOrKey: config.accessSecret,
     });
   }
 
