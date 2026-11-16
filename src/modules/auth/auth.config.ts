@@ -11,6 +11,10 @@ export interface AuthConfig {
   refreshTtlSeconds: number;
   cookieSecure: boolean;
   cookieSameSite: SameSite;
+  // The path the browser sees in front of the API's own routes: "" when it
+  // calls the API directly, "/api" when the UI proxies it under /api. Cookie
+  // paths are matched against the browser's URL, so path-scoped cookies need it.
+  cookiePathPrefix: string;
   // Optional so a deploy without it still boots; Google sign-in then answers
   // 503 instead of taking the whole API down.
   googleClientId?: string;
@@ -72,6 +76,13 @@ export function loadAuthConfig(config: ConfigService): AuthConfig {
     throw new Error('COOKIE_SAME_SITE=none requires COOKIE_SECURE=true');
   }
 
+  const cookiePathPrefix = config.get<string>('COOKIE_PATH_PREFIX', '').trim();
+  if (cookiePathPrefix && !/^\/[^/]+(\/[^/]+)*$/.test(cookiePathPrefix)) {
+    throw new Error(
+      `Invalid COOKIE_PATH_PREFIX value: "${cookiePathPrefix}" (expected e.g. "/api")`,
+    );
+  }
+
   return {
     accessSecret,
     refreshSecret,
@@ -83,6 +94,7 @@ export function loadAuthConfig(config: ConfigService): AuthConfig {
     ),
     cookieSecure,
     cookieSameSite: cookieSameSite as SameSite,
+    cookiePathPrefix,
     googleClientId: config.get<string>('GOOGLE_CLIENT_ID') || undefined,
   };
 }

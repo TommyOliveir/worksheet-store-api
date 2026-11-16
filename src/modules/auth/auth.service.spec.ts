@@ -15,6 +15,7 @@ const config: AuthConfig = {
   refreshTtlSeconds: 604800,
   cookieSecure: false,
   cookieSameSite: 'strict',
+  cookiePathPrefix: '',
 };
 
 const user: User = {

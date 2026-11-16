@@ -7,7 +7,7 @@ export const REFRESH_TOKEN_COOKIE = 'refresh_token';
 
 // The refresh token is only ever read by /auth/refresh and /auth/logout, so it
 // is scoped to /auth and not sent along with every other API call.
-const REFRESH_TOKEN_PATH = '/auth';
+const REFRESH_TOKEN_ROUTE = '/auth';
 
 export interface AuthTokens {
   accessToken: string;
@@ -26,7 +26,7 @@ export class AuthCookieService {
     });
     res.cookie(REFRESH_TOKEN_COOKIE, tokens.refreshToken, {
       ...this.baseOptions(),
-      path: REFRESH_TOKEN_PATH,
+      path: this.refreshTokenPath(),
       maxAge: this.config.refreshTtlSeconds * 1000,
     });
   }
@@ -37,8 +37,14 @@ export class AuthCookieService {
     res.clearCookie(ACCESS_TOKEN_COOKIE, { ...this.baseOptions(), path: '/' });
     res.clearCookie(REFRESH_TOKEN_COOKIE, {
       ...this.baseOptions(),
-      path: REFRESH_TOKEN_PATH,
+      path: this.refreshTokenPath(),
     });
+  }
+
+  // Behind the UI's /api proxy the browser calls /api/auth/refresh, and a
+  // cookie scoped to /auth would never be sent there.
+  private refreshTokenPath(): string {
+    return `${this.config.cookiePathPrefix}${REFRESH_TOKEN_ROUTE}`;
   }
 
   private baseOptions(): CookieOptions {
