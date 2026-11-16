@@ -53,3 +53,6 @@ pids
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# TypeScript incremental build cache (a stale copy makes `nest build` skip emitting dist/)
+*.tsbuildinfo
