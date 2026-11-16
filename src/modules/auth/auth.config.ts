@@ -11,6 +11,9 @@ export interface AuthConfig {
   refreshTtlSeconds: number;
   cookieSecure: boolean;
   cookieSameSite: SameSite;
+  // Optional so a deploy without it still boots; Google sign-in then answers
+  // 503 instead of taking the whole API down.
+  googleClientId?: string;
 }
 
 // Expiry values take the shorthand jsonwebtoken accepts ("7d", "15m",
@@ -80,5 +83,6 @@ export function loadAuthConfig(config: ConfigService): AuthConfig {
     ),
     cookieSecure,
     cookieSameSite: cookieSameSite as SameSite,
+    googleClientId: config.get<string>('GOOGLE_CLIENT_ID') || undefined,
   };
 }

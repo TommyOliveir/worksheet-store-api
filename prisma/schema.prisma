@@ -22,7 +22,11 @@ enum OrderStatus {
 model User {
   id        String      @id @default(uuid())
   email     String      @unique
-  password  String
+  // Null for accounts created through Google sign-in, which have no password.
+  password  String?
+  // Google's stable account id (the ID token's `sub`). Set once an account
+  // has signed in with Google, and used to find it again on later sign-ins.
+  googleId  String?     @unique
   fullName  String
   role      Role        @default(BUYER)
   createdAt DateTime    @default(now())

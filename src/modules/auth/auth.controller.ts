@@ -19,6 +19,7 @@ import {
 import { AuthCookieService } from './auth-cookie.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { GoogleLoginDto } from './dto/google-login.dto';
 import { RefreshTokenContext } from './strategies/jwt-refresh.strategy';
 import { Public } from '../../common/decorators/public.decorator';
 import { GetSessionId } from '../../common/decorators/get-session-id.decorator';
@@ -55,6 +56,22 @@ export class AuthController {
     @Headers('user-agent') userAgent?: string,
   ): Promise<AuthResponse> {
     return this.respond(res, await this.authService.login(dto, userAgent));
+  }
+
+  // The browser gets an ID token from Google Identity Services and posts it
+  // here; the API verifies it and starts an ordinary cookie session.
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Post('google')
+  async google(
+    @Body() dto: GoogleLoginDto,
+    @Res({ passthrough: true }) res: Response,
+    @Headers('user-agent') userAgent?: string,
+  ): Promise<AuthResponse> {
+    return this.respond(
+      res,
+      await this.authService.googleLogin(dto, userAgent),
+    );
   }
 
   // @Public() because the access token is expected to have expired by the

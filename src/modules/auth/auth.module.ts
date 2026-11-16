@@ -9,6 +9,7 @@ import { AUTH_CONFIG, loadAuthConfig } from './auth.config';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
 import { SessionCleanupService } from './session-cleanup.service';
+import { GoogleTokenVerifier } from './google-token.verifier';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { SessionCleanupService } from './session-cleanup.service';
     JwtStrategy,
     JwtRefreshStrategy,
     SessionCleanupService,
+    GoogleTokenVerifier,
   ],
   exports: [AuthService],
 })

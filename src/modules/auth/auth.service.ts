@@ -13,6 +13,8 @@ import { LoginDto } from './dto/login.dto';
 import { Prisma, User } from '@prisma/client';
 import { AUTH_CONFIG, AuthConfig } from './auth.config';
 import { AuthTokens } from './auth-cookie.service';
+import { GoogleLoginDto } from './dto/google-login.dto';
+import { GoogleIdentity, GoogleTokenVerifier } from './google-token.verifier';
 
 export interface AuthResult {
   user: Omit<User, 'password'>;
@@ -66,6 +68,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     @Inject(AUTH_CONFIG) private readonly config: AuthConfig,
+    private readonly googleVerifier: GoogleTokenVerifier,
   ) {}
 
   async register(dto: RegisterDto, userAgent?: string): Promise<AuthResult> {
@@ -116,7 +119,10 @@ export class AuthService {
       where: { email: dto.email },
     });
 
-    if (!user) {
+    // An account made through Google sign-in has no password. It is rejected
+    // exactly like a missing one, so the response does not disclose which
+    // accounts are Google-only.
+    if (!user?.password) {
       await bcrypt.compare(dto.password, ABSENT_USER_PASSWORD_HASH);
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -133,6 +139,42 @@ export class AuthService {
     await this.pruneExpiredSessions(user.id).catch(() => undefined);
 
     return { user: withoutPassword(user), tokens };
+  }
+
+  // Signs in with a Google ID token, creating the account on first use. The
+  // result is the same session and cookies a password login produces.
+  async googleLogin(
+    dto: GoogleLoginDto,
+    userAgent?: string,
+  ): Promise<AuthResult> {
+    const identity = await this.googleVerifier.verify(dto.credential);
+
+    // Linking by email is only safe when Google vouches for the address;
+    // otherwise anyone could claim an existing account's email.
+    if (!identity.emailVerified) {
+      throw new UnauthorizedException('Google account email is not verified');
+    }
+
+    let result: AuthResult;
+    try {
+      result = await this.startGoogleSession(identity, userAgent);
+    } catch (error) {
+      // Two first-time sign-ins for the same Google account can both miss the
+      // lookup and race to create it. The loser retries, and then finds the
+      // row the winner wrote.
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        result = await this.startGoogleSession(identity, userAgent);
+      } else {
+        throw error;
+      }
+    }
+
+    await this.pruneExpiredSessions(result.user.id).catch(() => undefined);
+
+    return result;
   }
 
   // Exchanges the session's current refresh token for a new pair. The old
@@ -209,6 +251,50 @@ export class AuthService {
       where: { id: sessionId, revokedAt: null },
       data: { revokedAt: new Date(), refreshTokenHash: null },
     });
+  }
+
+  private startGoogleSession(
+    identity: GoogleIdentity,
+    userAgent?: string,
+  ): Promise<AuthResult> {
+    // One transaction, as in register: an account must not be created or
+    // linked without the session that was the point of the request.
+    return this.prisma.$transaction(async (tx) => {
+      const user = await this.findOrCreateGoogleUser(tx, identity);
+      const tokens = await this.startSession(tx, user, userAgent);
+      return { user: withoutPassword(user), tokens };
+    });
+  }
+
+  private async findOrCreateGoogleUser(
+    db: Prisma.TransactionClient,
+    { googleId, email, fullName }: GoogleIdentity,
+  ): Promise<User> {
+    const linked = await db.user.findUnique({ where: { googleId } });
+    if (linked) {
+      return linked;
+    }
+
+    // Emails are stored as typed at signup, while Google reports them in
+    // lower case, so the match ignores case.
+    const existing = await db.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
+    });
+
+    if (existing) {
+      if (existing.googleId) {
+        throw new ConflictException(
+          'This email is linked to a different Google account',
+        );
+      }
+      return db.user.update({
+        where: { id: existing.id },
+        data: { googleId },
+      });
+    }
+
+    // As in register, the role is left to the schema default (BUYER).
+    return db.user.create({ data: { email, fullName, googleId } });
   }
 
   private async startSession(
