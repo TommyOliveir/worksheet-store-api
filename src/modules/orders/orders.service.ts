@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -42,6 +43,24 @@ export class OrdersService {
 
     if (worksheets.length !== uniqueIds.length) {
       throw new NotFoundException('One or more worksheets not found');
+    }
+
+    // A purchase gives permanent download access, so a worksheet in any of
+    // the user's paid orders must never be charged for again. Only COMPLETED
+    // orders count, the same rule the download check uses: an abandoned
+    // PENDING checkout must not stop the user from buying it later.
+    const alreadyOwned = await this.prisma.orderItem.findMany({
+      where: {
+        worksheetId: { in: uniqueIds },
+        order: { userId, status: OrderStatus.COMPLETED },
+      },
+      select: { worksheet: { select: { title: true } } },
+      distinct: ['worksheetId'],
+    });
+
+    if (alreadyOwned.length > 0) {
+      const titles = alreadyOwned.map((item) => item.worksheet.title);
+      throw new ConflictException(`You already own: ${titles.join(', ')}`);
     }
 
     const totalAmount = worksheets.reduce((sum, w) => sum + Number(w.price), 0);
